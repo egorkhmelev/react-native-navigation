@@ -12,7 +12,7 @@ function startApp(activityParams) {
 
 function push(screenParams) {
   savePassProps(screenParams);
-  NativeReactModule.push(screenParams);
+  return NativeReactModule.push(screenParams);
 }
 
 function pop(screenParams) {
@@ -62,8 +62,8 @@ function dismissLightBox() {
   NativeReactModule.dismissLightBox();
 }
 
-function dismissTopModal() {
-  NativeReactModule.dismissTopModal();
+function dismissTopModal(params) {
+  NativeReactModule.dismissTopModal(params);
 }
 
 function dismissAllModals() {
@@ -110,6 +110,10 @@ function savePassProps(params) {
   }
   if (params.sideMenu && params.sideMenu.right) {
     PropRegistry.save(params.sideMenu.right.navigationParams.screenInstanceID, params.sideMenu.right.passProps);
+  }
+
+  if (params.overlay) {
+    PropRegistry.save(params.overlay.navigationParams.screenInstanceID, params.overlay.passProps);
   }
 }
 

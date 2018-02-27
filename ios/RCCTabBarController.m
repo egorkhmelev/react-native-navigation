@@ -14,6 +14,12 @@
 
 @end
 
+@interface RCCTabBarController()
+
+@property (strong, nonatomic) RCTRootView *overlayView;
+
+@end
+
 @implementation RCCTabBarController
 
 
@@ -77,13 +83,15 @@
   if (!self) return nil;
   
   self.delegate = self;
-  
   self.tabBar.translucent = YES; // default
+
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onRNReload) name:RCTJavaScriptWillStartLoadingNotification object:nil];
   
   UIColor *buttonColor = nil;
   UIColor *selectedButtonColor = nil;
   UIColor *labelColor = nil;
   UIColor *selectedLabelColor = nil;
+  NSDictionary *passProps = props[@"passProps"];
   NSDictionary *tabsStyle = props[@"style"];
   if (tabsStyle)
   {
@@ -131,6 +139,19 @@
     {
       self.tabBar.clipsToBounds = [tabBarHideShadow boolValue] ? YES : NO;
     }
+  }
+  
+  NSString *overlayScreen = [props valueForKeyPath:@"overlay.screen"];
+  if (overlayScreen) {
+    // Pass navigation props
+    NSMutableDictionary *mutablePassPropsOverlay = [passProps mutableCopy];
+    NSDictionary *overlayProps = [props valueForKeyPath:@"overlay.passProps"];
+    if (overlayProps) {
+      [mutablePassPropsOverlay addEntriesFromDictionary:overlayProps];
+    }
+    
+    NSDictionary *passPropsOverlay = [NSDictionary dictionaryWithDictionary:mutablePassPropsOverlay];
+    self.overlayView = [[RCTRootView alloc] initWithBridge:bridge moduleName:overlayScreen initialProperties:passPropsOverlay];
   }
   
   NSMutableArray *viewControllers = [NSMutableArray array];
@@ -218,10 +239,64 @@
   
   // replace the tabs
   self.viewControllers = viewControllers;
+
+  NSNumber *initialTab = tabsStyle[@"initialTabIndex"];
+  if (initialTab)
+  {
+    NSInteger initialTabIndex = initialTab.integerValue;
+    [self setSelectedIndex:initialTabIndex];
+  }
   
   [self setRotation:props];
   
   return self;
+}
+
+- (void)showOverlay:(NSDictionary *)params {
+  NSString *overlayScreen = [params valueForKeyPath:@"screen"];
+  NSDictionary *overlayProps = [params valueForKeyPath:@"passProps"];
+  self.overlayView = [[RCTRootView alloc] initWithBridge:[[RCCManager sharedInstance] getBridge] moduleName:overlayScreen initialProperties:overlayProps];
+}
+
+- (void)removeOverlay {
+  self.overlayView = nil;
+}
+
+- (void)setOverlayView:(RCTRootView *)overlayView {
+  RCTRootView *previousOverlayView = _overlayView;
+  
+  if (previousOverlayView) {
+    [previousOverlayView removeFromSuperview];
+  }
+  
+  _overlayView = overlayView;
+  
+  if (!_overlayView) {
+    return;
+  }
+  
+  _overlayView.passThroughTouches = YES;
+  _overlayView.backgroundColor = [UIColor clearColor];
+  _overlayView.frame = self.view.bounds;
+  [self.view addSubview:_overlayView];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  
+  if (_overlayView) {
+    [self.view bringSubviewToFront:_overlayView];
+  }
+}
+
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:RCTJavaScriptWillStartLoadingNotification object:nil];
+  self.overlayView = nil;
+}
+
+- (void)onRNReload {
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:RCTJavaScriptWillStartLoadingNotification object:nil];
+  self.overlayView = nil;
 }
 
 - (void)performAction:(NSString*)performAction actionParams:(NSDictionary*)actionParams bridge:(RCTBridge *)bridge completion:(void (^)(void))completion
@@ -256,6 +331,12 @@
       }
       else
       {
+        NSString *badgeColor = actionParams[@"badgeColor"];
+        UIColor *color = badgeColor != (id)[NSNull null] ? [RCTConvert UIColor:badgeColor] : nil;
+        
+        if ([viewController.tabBarItem respondsToSelector:@selector(badgeColor)]) {
+          viewController.tabBarItem.badgeColor = color;
+        }
         viewController.tabBarItem.badgeValue = [NSString stringWithFormat:@"%@", badge];
       }
     }
@@ -316,8 +397,8 @@
         iconImage = [RCTConvert UIImage:icon];
         iconImage = [[self image:iconImage withColor:self.tabBar.tintColor] imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal];
         viewController.tabBarItem.image = iconImage;
-      
       }
+      
       UIImage *iconImageSelected = nil;
       id selectedIcon = actionParams[@"selectedIcon"];
       if (selectedIcon && selectedIcon != (id)[NSNull null])
@@ -325,12 +406,22 @@
         iconImageSelected = [RCTConvert UIImage:selectedIcon];
         viewController.tabBarItem.selectedImage = iconImageSelected;
       }
+      
+      id label = actionParams[@"label"];
+      if (label && label != (id)[NSNull null])
+      {
+        viewController.tabBarItem.title = label;
+      }
     }
   }
   
   if ([performAction isEqualToString:@"setTabBarHidden"])
   {
     BOOL hidden = [actionParams[@"hidden"] boolValue];
+    
+    CGRect nextFrame = self.tabBar.frame;
+    nextFrame.origin.y = UIScreen.mainScreen.bounds.size.height - (hidden ? 0 : self.tabBar.frame.size.height);
+    
     [UIView animateWithDuration: ([actionParams[@"animated"] boolValue] ? 0.45 : 0)
                           delay: 0
          usingSpringWithDamping: 0.75
@@ -338,7 +429,7 @@
                         options: (hidden ? UIViewAnimationOptionCurveEaseIn : UIViewAnimationOptionCurveEaseOut)
                      animations:^()
      {
-       self.tabBar.transform = hidden ? CGAffineTransformMakeTranslation(0, self.tabBar.frame.size.height) : CGAffineTransformIdentity;
+         [self.tabBar setFrame:nextFrame];
      }
                      completion:^(BOOL finished)
      {

@@ -229,6 +229,12 @@ RCT_EXPORT_METHOD(
     
     // first clear the registry to remove any refernece to the previous controllers
     [[RCCManager sharedInstance] clearModuleRegistry];
+    [[RCCManager sharedInstance] setAppStyle:nil];
+    
+    NSDictionary *appStyle = layout[@"props"][@"appStyle"];
+    if (appStyle) {
+        [[RCCManager sharedIntance] setAppStyle:appStyle];
+    }
     
     // create the new controller
     UIViewController *controller = [RCCViewController controllerWithLayout:layout globalProps:modifiedGloablProps bridge:[[RCCManager sharedInstance] getBridge]];
@@ -378,6 +384,24 @@ RCT_EXPORT_METHOD(getCurrentlyVisibleScreenId:(RCTPromiseResolveBlock)resolve re
     NSString *controllerId = [[RCCManager sharedIntance] getIdForController:visibleVC];
     id result = (controllerId != nil) ? @{@"screenId": controllerId} : nil;
     resolve(result);
+}
+
+RCT_EXPORT_METHOD(
+                  showOverlay:(NSDictionary*)params)
+{
+    UIViewController *rootVC = [UIApplication sharedApplication].delegate.window.rootViewController;
+    if ([rootVC respondsToSelector:@selector(showOverlay:)]) {
+        [rootVC performSelector:@selector(showOverlay:) withObject:params];
+    }
+}
+
+RCT_EXPORT_METHOD(
+                  removeOverlay)
+{
+    UIViewController *rootVC = [UIApplication sharedApplication].delegate.window.rootViewController;
+    if ([rootVC respondsToSelector:@selector(removeOverlay)]) {
+        [rootVC performSelector:@selector(removeOverlay)];
+    }
 }
 
 -(BOOL)viewControllerIsModal:(UIViewController*)viewController

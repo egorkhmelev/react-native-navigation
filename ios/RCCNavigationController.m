@@ -2,6 +2,10 @@
 #import "RCCViewController.h"
 #import "RCCManager.h"
 #import <React/RCTEventDispatcher.h>
+#import <React/RCTUIManager.h>
+#if __has_include(<React/RCTUIManagerUtils.h>)
+#import <React/RCTUIManagerUtils.h>
+#endif
 #import <React/RCTConvert.h>
 #import <React/RCTRootView.h>
 #import <objc/runtime.h>
@@ -9,6 +13,13 @@
 #import "RCCCustomBarButtonItem.h"
 #import "UIViewController+Rotation.h"
 #import "RCTHelpers.h"
+#import "RCTConvert+UIBarButtonSystemItem.h"
+
+@interface RCCNavigationController()
+
+@property (strong, nonatomic) RCTRootView *overlayView;
+
+@end
 
 @implementation RCCNavigationController
 {
@@ -30,6 +41,8 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
   
   NSString *component = props[@"component"];
   if (!component) return nil;
+  
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onRNReload) name:RCTJavaScriptWillStartLoadingNotification object:nil];
   
   NSDictionary *passProps = props[@"passProps"];
   NSDictionary *navigatorStyle = props[@"style"];
@@ -62,10 +75,69 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
   
 
   [self setRotation:props];
-  
+
+  NSString *overlayScreen = [props valueForKeyPath:@"overlay.screen"];
+  if (overlayScreen) {
+    // Pass navigation props
+    NSMutableDictionary *mutablePassPropsOverlay = [passProps mutableCopy];
+    NSDictionary *overlayProps = [props valueForKeyPath:@"overlay.passProps"];
+    if (overlayProps) {
+      [mutablePassPropsOverlay addEntriesFromDictionary:overlayProps];
+    }
+
+    NSDictionary *passPropsOverlay = [NSDictionary dictionaryWithDictionary:mutablePassPropsOverlay];
+    self.overlayView = [[RCTRootView alloc] initWithBridge:bridge moduleName:overlayScreen initialProperties:passPropsOverlay];
+  }
+
   return self;
 }
 
+- (void)dealloc {
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:RCTJavaScriptWillStartLoadingNotification object:nil];
+  self.overlayView = nil;
+}
+
+- (void)onRNReload {
+  [[NSNotificationCenter defaultCenter] removeObserver:self name:RCTJavaScriptWillStartLoadingNotification object:nil];
+  self.overlayView = nil;
+}
+
+- (void)showOverlay:(NSDictionary *)params {
+  NSString *overlayScreen = [params valueForKeyPath:@"screen"];
+  NSDictionary *overlayProps = [params valueForKeyPath:@"passProps"];
+  self.overlayView = [[RCTRootView alloc] initWithBridge:[[RCCManager sharedInstance] getBridge] moduleName:overlayScreen initialProperties:overlayProps];
+}
+
+- (void)removeOverlay {
+  self.overlayView = nil;
+}
+
+- (void)setOverlayView:(RCTRootView *)overlayView {
+  RCTRootView *previousOverlayView = _overlayView;
+
+  if (previousOverlayView) {
+    [previousOverlayView removeFromSuperview];
+  }
+
+  _overlayView = overlayView;
+
+  if (!_overlayView) {
+    return;
+  }
+
+  _overlayView.passThroughTouches = YES;
+  _overlayView.backgroundColor = [UIColor clearColor];
+  _overlayView.frame = self.view.bounds;
+  [self.view addSubview:_overlayView];
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  
+  if (_overlayView) {
+    [self.view bringSubviewToFront:_overlayView];
+  }
+}
 
 - (void)performAction:(NSString*)performAction actionParams:(NSDictionary*)actionParams bridge:(RCTBridge *)bridge
 {
@@ -82,30 +154,36 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
     passProps[GLOBAL_SCREEN_ACTION_TIMESTAMP] = actionParams[GLOBAL_SCREEN_ACTION_TIMESTAMP];
     NSDictionary *navigatorStyle = actionParams[@"style"];
     
-    // merge the navigatorStyle of our parent
-    if ([self.topViewController isKindOfClass:[RCCViewController class]])
-    {
-      RCCViewController *parent = (RCCViewController*)self.topViewController;
-      NSMutableDictionary *mergedStyle = [NSMutableDictionary dictionaryWithDictionary:parent.navigatorStyle];
+    NSNumber *keepStyleAcrossPush = [[RCCManager sharedInstance] getAppStyle][@"keepStyleAcrossPush"];
+    BOOL keepStyleAcrossPushBool = keepStyleAcrossPush ? [keepStyleAcrossPush boolValue] : YES;
+    
+    if (keepStyleAcrossPushBool) {
       
-      // there are a few styles that we don't want to remember from our parent (they should be local)
-      [mergedStyle removeObjectForKey:@"navBarHidden"];
-      [mergedStyle removeObjectForKey:@"statusBarHidden"];
-      [mergedStyle removeObjectForKey:@"navBarHideOnScroll"];
-      [mergedStyle removeObjectForKey:@"drawUnderNavBar"];
-      [mergedStyle removeObjectForKey:@"drawUnderTabBar"];
-      [mergedStyle removeObjectForKey:@"statusBarBlur"];
-      [mergedStyle removeObjectForKey:@"navBarBlur"];
-      [mergedStyle removeObjectForKey:@"navBarTranslucent"];
-      [mergedStyle removeObjectForKey:@"statusBarHideWithNavBar"];
-      [mergedStyle removeObjectForKey:@"autoAdjustScrollViewInsets"];
-      [mergedStyle removeObjectForKey:@"statusBarTextColorSchemeSingleScreen"];
-      [mergedStyle removeObjectForKey:@"disabledBackGesture"];
-      [mergedStyle removeObjectForKey:@"navBarCustomView"];
-      [mergedStyle removeObjectForKey:@"navBarComponentAlignment"];
-       
-      [mergedStyle addEntriesFromDictionary:navigatorStyle];
-      navigatorStyle = mergedStyle;
+      if ([self.topViewController isKindOfClass:[RCCViewController class]])
+      {
+        RCCViewController *parent = (RCCViewController*)self.topViewController;
+        NSMutableDictionary *mergedStyle = [NSMutableDictionary dictionaryWithDictionary:parent.navigatorStyle];
+        
+        // there are a few styles that we don't want to remember from our parent (they should be local)
+        [mergedStyle removeObjectForKey:@"navBarHidden"];
+        [mergedStyle removeObjectForKey:@"statusBarHidden"];
+        [mergedStyle removeObjectForKey:@"navBarHideOnScroll"];
+        [mergedStyle removeObjectForKey:@"drawUnderNavBar"];
+        [mergedStyle removeObjectForKey:@"drawUnderTabBar"];
+        [mergedStyle removeObjectForKey:@"statusBarBlur"];
+        [mergedStyle removeObjectForKey:@"navBarBlur"];
+        [mergedStyle removeObjectForKey:@"navBarTranslucent"];
+        [mergedStyle removeObjectForKey:@"statusBarHideWithNavBar"];
+        [mergedStyle removeObjectForKey:@"autoAdjustScrollViewInsets"];
+        [mergedStyle removeObjectForKey:@"statusBarTextColorSchemeSingleScreen"];
+        [mergedStyle removeObjectForKey:@"disabledBackGesture"];
+        [mergedStyle removeObjectForKey:@"disabledSimultaneousGesture"];
+        [mergedStyle removeObjectForKey:@"navBarCustomView"];
+        [mergedStyle removeObjectForKey:@"navBarComponentAlignment"];
+        
+        [mergedStyle addEntriesFromDictionary:navigatorStyle];
+        navigatorStyle = mergedStyle;
+      }
     }
     
     RCCViewController *viewController = [[RCCViewController alloc] initWithComponent:component passProps:passProps navigatorStyle:navigatorStyle globalProps:nil bridge:bridge];
@@ -116,6 +194,12 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
                      style:navigatorStyle];
     
     NSString *backButtonTitle = actionParams[@"backButtonTitle"];
+    if (!backButtonTitle) {
+      NSNumber *hideBackButtonTitle = [[RCCManager sharedInstance] getAppStyle][@"hideBackButtonTitle"];
+      BOOL hideBackButtonTitleBool = hideBackButtonTitle ? [hideBackButtonTitle boolValue] : NO;
+      backButtonTitle = hideBackButtonTitleBool ? @"" : backButtonTitle;
+    }
+    
     if (backButtonTitle)
     {
       UIBarButtonItem *backItem = [[UIBarButtonItem alloc] initWithTitle:backButtonTitle
@@ -147,6 +231,33 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
     if (rightButtons)
     {
       [self setButtons:rightButtons viewController:viewController side:@"right" animated:NO];
+    }
+
+    NSArray *previewActions = actionParams[@"previewActions"];
+    NSString *previewViewID = actionParams[@"previewViewID"];
+    if (previewViewID) {
+      if ([self.topViewController isKindOfClass:[RCCViewController class]])
+      {
+        RCCViewController *topViewController = ((RCCViewController*)self.topViewController);
+        viewController.previewActions = previewActions;
+        viewController.previewCommit = actionParams[@"previewCommit"] ? [actionParams[@"previewCommit"] boolValue] : YES;
+        NSNumber *previewHeight = actionParams[@"previewHeight"];
+        if (previewHeight) {
+          viewController.preferredContentSize = CGSizeMake(viewController.view.frame.size.width, [previewHeight floatValue]);
+        }
+        if (topViewController.traitCollection.forceTouchCapability == UIForceTouchCapabilityAvailable)
+        {
+          dispatch_async(RCTGetUIManagerQueue(), ^{
+            [bridge.uiManager addUIBlock:^(__unused RCTUIManager *uiManager, NSDictionary<NSNumber *, UIView *> *viewRegistry) {
+              UIView *view = viewRegistry[previewViewID];
+              topViewController.previewView = view;
+              [topViewController registerForPreviewingWithDelegate:(id)topViewController sourceView:view];
+            }];
+          });
+          topViewController.previewController = viewController;
+        }
+        return;
+      }
     }
     
     NSString *animationType = actionParams[@"animationType"];
@@ -336,6 +447,8 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
     id icon = button[@"icon"];
     if (icon) iconImage = [RCTConvert UIImage:icon];
     NSString *__nullable component = button[@"component"];
+    NSString *__nullable systemItemName = button[@"systemItem"];
+    UIBarButtonSystemItem systemItem = [RCTConvert UIBarButtonSystemItem:systemItemName];
 
     UIBarButtonItem *barButtonItem;
     if (iconImage)
@@ -354,6 +467,9 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
     else if (component) {
       RCTBridge *bridge = [[RCCManager sharedInstance] getBridge];
       barButtonItem = [[RCCCustomBarButtonItem alloc] initWithComponentName:component passProps:button[@"passProps"] bridge:bridge];
+    }
+    else if (systemItemName) {
+      barButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:systemItem target:self action:@selector(onButtonPress:)];
     }
     else continue;
     objc_setAssociatedObject(barButtonItem, &CALLBACK_ASSOCIATED_KEY, button[@"onPress"], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -375,6 +491,16 @@ NSString const *CALLBACK_ASSOCIATED_ID = @"RCCNavigationController.CALLBACK_ASSO
     BOOL disableIconTint = disableIconTintString ? [disableIconTintString boolValue] : NO;
     if (disableIconTint) {
       [barButtonItem setImage:[barButtonItem.image imageWithRenderingMode:UIImageRenderingModeAlwaysOriginal]];
+    }
+    
+    if ([viewController isKindOfClass:[RCCViewController class]]) {
+      RCCViewController *rccViewController = ((RCCViewController*)viewController);
+      NSDictionary *navigatorStyle = rccViewController.navigatorStyle;
+      id disabledButtonColor = navigatorStyle[@"disabledButtonColor"];
+      if (disabledButtonColor) {
+        UIColor *color = [RCTConvert UIColor:disabledButtonColor];
+        [barButtonItem setTitleTextAttributes:@{NSForegroundColorAttributeName : color} forState:UIControlStateDisabled];
+      }
     }
     
     NSString *testID = button[@"testID"];

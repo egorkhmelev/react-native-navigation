@@ -7,9 +7,11 @@ import android.view.View;
 import android.widget.RelativeLayout;
 
 import com.facebook.react.bridge.Callback;
+import com.facebook.react.bridge.Promise;
 import com.reactnativenavigation.NavigationApplication;
 import com.reactnativenavigation.events.EventBus;
 import com.reactnativenavigation.events.ScreenChangedEvent;
+import com.reactnativenavigation.params.ActivityParams;
 import com.reactnativenavigation.params.ContextualMenuParams;
 import com.reactnativenavigation.params.FabParams;
 import com.reactnativenavigation.params.LightBoxParams;
@@ -22,6 +24,8 @@ import com.reactnativenavigation.params.TitleBarLeftButtonParams;
 import com.reactnativenavigation.screens.NavigationType;
 import com.reactnativenavigation.screens.Screen;
 import com.reactnativenavigation.screens.ScreenStack;
+import com.reactnativenavigation.utils.ViewUtils;
+import com.reactnativenavigation.views.ContentOverlayView;
 import com.reactnativenavigation.views.LeftButtonOnClickListener;
 import com.reactnativenavigation.views.LightBox;
 import com.reactnativenavigation.views.SideMenu;
@@ -37,8 +41,11 @@ import static android.view.ViewGroup.LayoutParams.MATCH_PARENT;
 public class SingleScreenLayout extends BaseLayout {
 
     protected final ScreenParams screenParams;
+    protected final ScreenParams overlayParams;
     private final SideMenuParams leftSideMenuParams;
     private final SideMenuParams rightSideMenuParams;
+    private RelativeLayout container;
+    private ContentOverlayView overlayView;
     protected ScreenStack stack;
     private SnackbarAndFabContainer snackbarAndFabContainer;
     protected LeftButtonOnClickListener leftButtonOnClickListener;
@@ -48,8 +55,18 @@ public class SingleScreenLayout extends BaseLayout {
 
     public SingleScreenLayout(AppCompatActivity activity, SideMenuParams leftSideMenuParams,
                               SideMenuParams rightSideMenuParams, ScreenParams screenParams) {
+        this(activity, leftSideMenuParams, rightSideMenuParams, screenParams, null);
+    }
+
+    public SingleScreenLayout(AppCompatActivity activity, ActivityParams params) {
+        this(activity, params.leftSideMenuParams, params.rightSideMenuParams, params.screenParams, params.overlayParams);
+    }
+
+    public SingleScreenLayout(AppCompatActivity activity, SideMenuParams leftSideMenuParams,
+                              SideMenuParams rightSideMenuParams, ScreenParams screenParams, ScreenParams overlayParams) {
         super(activity);
         this.screenParams = screenParams;
+        this.overlayParams = overlayParams;
         this.leftSideMenuParams = leftSideMenuParams;
         this.rightSideMenuParams = rightSideMenuParams;
         createLayout();
@@ -81,7 +98,19 @@ public class SingleScreenLayout extends BaseLayout {
         if (stack != null) {
             stack.destroy();
         }
-        stack = new ScreenStack(getActivity(), parent, screenParams.getNavigatorId(), this);
+
+        container = new RelativeLayout(getContext());
+        container.setId(ViewUtils.generateViewId());
+        LayoutParams containerLayoutParams = new LayoutParams(MATCH_PARENT, MATCH_PARENT);
+        parent.addView(container, containerLayoutParams);
+
+        if (overlayParams != null) {
+            overlayView = new ContentOverlayView(getActivity(), overlayParams.screenId, overlayParams.navigationParams);
+            LayoutParams overlayViewLayoutParams = new LayoutParams(MATCH_PARENT, MATCH_PARENT);
+            parent.addView(overlayView, overlayViewLayoutParams);
+        }
+
+        stack = new ScreenStack(getActivity(), container, screenParams.getNavigatorId(), this);
         LayoutParams lp = new LayoutParams(MATCH_PARENT, MATCH_PARENT);
         pushInitialScreen(lp);
     }
@@ -109,7 +138,7 @@ public class SingleScreenLayout extends BaseLayout {
 
     @Override
     public boolean onBackPressed() {
-        if (stack.handleBackPressInJs()) {
+        if (handleBackInJs()) {
             return true;
         }
 
@@ -123,9 +152,23 @@ public class SingleScreenLayout extends BaseLayout {
     }
 
     @Override
+    public boolean handleBackInJs() {
+        return stack.handleBackPressInJs();
+    }
+
+    @Override
     public void destroy() {
         stack.destroy();
         snackbarAndFabContainer.destroy();
+
+        RelativeLayout parentLayout = getScreenStackParent();
+
+        if (overlayView != null) {
+            overlayView.unmountReactView();
+            parentLayout.removeView(overlayView);
+        }
+        parentLayout.removeView(container);
+
         if (sideMenu != null) {
             sideMenu.destroy();
         }
@@ -139,8 +182,8 @@ public class SingleScreenLayout extends BaseLayout {
     }
 
     @Override
-    public void push(ScreenParams params) {
-        stack.push(params, new LayoutParams(MATCH_PARENT, MATCH_PARENT));
+    public void push(ScreenParams params, Promise onPushComplete) {
+        stack.push(params, new LayoutParams(MATCH_PARENT, MATCH_PARENT), onPushComplete);
         EventBus.instance.post(new ScreenChangedEvent(params));
     }
 

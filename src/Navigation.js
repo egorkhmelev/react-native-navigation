@@ -36,13 +36,13 @@ function _registerComponentNoRedux(screenID, generator) {
       constructor(props) {
         super(props);
         this.state = {
-          internalProps: {...props, ...PropRegistry.load(props.screenInstanceID)}
+          internalProps: {...props, ...PropRegistry.load(props.screenInstanceID || props.passPropsKey)}
         }
       }
 
       componentWillReceiveProps(nextProps) {
         this.setState({
-          internalProps: {...PropRegistry.load(this.props.screenInstanceID), ...nextProps}
+          internalProps: {...PropRegistry.load(this.props.screenInstanceID || this.props.passPropsKey), ...nextProps}
         })
       }
 
@@ -67,13 +67,13 @@ function _registerComponentRedux(screenID, generator, store, Provider, options) 
       constructor(props) {
         super(props);
         this.state = {
-          internalProps: {...props, ...PropRegistry.load(props.screenInstanceID)}
+          internalProps: {...props, ...PropRegistry.load(props.screenInstanceID || props.passPropsKey)}
         }
       }
 
       componentWillReceiveProps(nextProps) {
         this.setState({
-          internalProps: {...PropRegistry.load(this.props.screenInstanceID), ...nextProps}
+          internalProps: {...PropRegistry.load(this.props.screenInstanceID || this.props.passPropsKey), ...nextProps}
         })
       }
 
@@ -174,6 +174,14 @@ function getCurrentlyVisibleScreenId() {
   return platformSpecific.getCurrentlyVisibleScreenId();
 }
 
+function showOverlay(params = {}) {
+  return platformSpecific.showOverlay(params);
+}
+
+function removeOverlay() {
+  return platformSpecific.removeOverlay();
+}
+
 export default {
   getRegisteredScreen,
   getCurrentlyVisibleScreenId,
@@ -192,5 +200,7 @@ export default {
   clearEventHandler: clearEventHandler,
   handleDeepLink: handleDeepLink,
   isAppLaunched: isAppLaunched,
-  isRootLaunched: isRootLaunched
+  isRootLaunched: isRootLaunched,
+  showOverlay: showOverlay,
+  removeOverlay: removeOverlay
 };
